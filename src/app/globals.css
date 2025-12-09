@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  /* Define your custom colors here (Tailwind v4 style) */
+  --color-dashboard-dark: #0b1221;
+  --color-dashboard-card: #161e32;
+  --color-dashboard-accent: #293047;
+  --color-dashboard-primary: #3b82f6;
+  --color-dashboard-success: #10b981;
+  --color-dashboard-danger: #ef4444;
+}
+
+/* This line forces Tailwind to use the "dark" class for dark mode 
+   instead of the system preference */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body {
+    @apply antialiased;
+  }
+}
