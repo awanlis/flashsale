@@ -3,15 +3,18 @@
 import React, { useEffect, useRef } from "react";
 import * as d3 from "d3";
 import { useTheme } from "next-themes";
+import useResizeObserver from "@/hooks/useResizeObserver";
 
 const SalesChart = () => {
-  const chartRef = useRef<SVGSVGElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const dimensions = useResizeObserver(wrapperRef);
   const { theme } = useTheme();
 
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!svgRef.current || !dimensions) return;
 
-    // 1. Data Mock (Mimicking the curves in your image)
+    // 1. Data Mock
     const points = 12;
     const data = Array.from({ length: points }, (_, i) => ({
       x: i,
@@ -20,20 +23,22 @@ const SalesChart = () => {
       forecast: 2000 + Math.random() * 3000 + Math.sin(i - 2) * 1000,
     }));
 
-    // 2. Setup Dimensions
+    // 2. Setup Dimensions based on ResizeObserver
     const margin = { top: 20, right: 20, bottom: 30, left: 50 };
-    const width = chartRef.current.clientWidth;
-    const height = 400;
+    const width = dimensions.width;
+    const height = dimensions.height; // Use container height
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
-    // Clear previous render
-    const svg = d3.select(chartRef.current);
+    // Don't draw if too small
+    if (innerWidth <= 0 || innerHeight <= 0) return;
+
+    const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
+    svg.attr("width", width).attr("height", height);
+
     const g = svg
-      .attr("width", width)
-      .attr("height", height)
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
@@ -41,7 +46,7 @@ const SalesChart = () => {
     const xScale = d3.scaleLinear().domain([0, points - 1]).range([0, innerWidth]);
     const yScale = d3.scaleLinear().domain([0, 10000]).range([innerHeight, 0]);
 
-    // 4. Grid Lines (Dashed)
+    // 4. Grid Lines
     const yAxisGrid = d3.axisLeft(yScale).tickSize(-innerWidth).tickFormat(() => "").ticks(5);
     const xAxisGrid = d3.axisBottom(xScale).tickSize(-innerHeight).tickFormat(() => "").ticks(points);
 
@@ -56,19 +61,21 @@ const SalesChart = () => {
       .call(xAxisGrid)
       .select(".domain").remove();
 
+    // Style dashes
+    g.selectAll(".tick line").attr("stroke-dasharray", "4,4");
+
+    // X Axis Labels
     const startTime = new Date();
     startTime.setHours(5, 30, 0, 0);
-
     const xLabels = Array.from({ length: points }, (_, i) => {
       const d = new Date(startTime);
-      d.setMinutes(startTime.getMinutes() + i * 15); // 15-minute steps
-      return d3.timeFormat("%-I:%M")(d); // 5:30, 5:45, 6:00 ...
+      d.setMinutes(startTime.getMinutes() + i * 15);
+      return d3.timeFormat("%-I:%M")(d);
     });
 
-    // Bottom axis, using the same xScale
     const xAxis = d3.axisBottom(xScale)
-      .tickValues(d3.range(points))       // 0..points-1
-      .tickSize(0)                        // no extra tick lines (grid already drawn)
+      .tickValues(d3.range(points))
+      .tickSize(0)
       .tickPadding(10)
       .tickFormat((_, i) => xLabels[i] ?? "");
 
@@ -76,20 +83,16 @@ const SalesChart = () => {
       .attr("transform", `translate(0,${innerHeight})`)
       .attr("class", "text-xs text-gray-500 dark:text-gray-400")
       .call(xAxis)
-      .select(".domain")
-      .remove();
+      .select(".domain").remove();
 
-    // Style grid lines specifically to be dashed
-    g.selectAll(".tick line").attr("stroke-dasharray", "4,4");
-
-    // 5. Axes Text
+    // Y Axis Labels
     const yAxis = d3.axisLeft(yScale).ticks(5);
     g.append("g")
       .call(yAxis)
       .attr("class", "text-xs text-gray-500 dark:text-gray-400")
       .select(".domain").remove();
 
-    // 6. Generators & Gradients
+    // Gradients
     const createGradient = (id: string, color: string) => {
       const defs = svg.append("defs");
       const gradient = defs.append("linearGradient")
@@ -102,9 +105,9 @@ const SalesChart = () => {
       gradient.append("stop").attr("offset", "100%").attr("stop-color", color).attr("stop-opacity", 0);
     };
 
-    createGradient("gradCurrent", "#10b981"); // Green
-    createGradient("gradTarget", "#3b82f6");  // Blue
-    createGradient("gradForecast", "#8b5cf6"); // Purple
+    createGradient("gradCurrent", "#10b981");
+    createGradient("gradTarget", "#3b82f6");
+    createGradient("gradForecast", "#8b5cf6");
 
     const areaGenerator = (key: "current" | "target" | "forecast") => d3.area<typeof data[0]>()
       .x(d => xScale(d.x))
@@ -117,7 +120,7 @@ const SalesChart = () => {
       .y(d => yScale(d[key]))
       .curve(d3.curveMonotoneX);
 
-    // 7. Draw Layers (Forecast -> Target -> Current)
+    // Layers
     const layers = [
       { key: "forecast", color: "#8b5cf6", grad: "url(#gradForecast)" },
       { key: "target", color: "#3b82f6", grad: "url(#gradTarget)" },
@@ -125,21 +128,9 @@ const SalesChart = () => {
     ] as const;
 
     layers.forEach(({ key, color, grad }) => {
-      // Area
-      g.append("path")
-        .datum(data)
-        .attr("fill", grad)
-        .attr("d", areaGenerator(key));
-
-      // Line
-      g.append("path")
-        .datum(data)
-        .attr("fill", "none")
-        .attr("stroke", color)
-        .attr("stroke-width", 2)
-        .attr("d", lineGenerator(key));
-
-      // Add a dot at a random peak to match UI
+      g.append("path").datum(data).attr("fill", grad).attr("d", areaGenerator(key));
+      g.append("path").datum(data).attr("fill", "none").attr("stroke", color).attr("stroke-width", 2).attr("d", lineGenerator(key));
+      
       const peakIndex = 8;
       g.append("circle")
         .attr("cx", xScale(data[peakIndex].x))
@@ -150,9 +141,14 @@ const SalesChart = () => {
         .attr("stroke-width", 2);
     });
 
-  }, [theme]); // Re-render on theme change
+  }, [theme, dimensions]); 
 
-  return <svg ref={chartRef} className="w-full h-[400px] overflow-visible" />;
+  // Wrapper div takes 100% size, SVG fills it
+  return (
+    <div ref={wrapperRef} className="w-full h-[350px] relative">
+      <svg ref={svgRef} className="w-full h-full overflow-visible" />
+    </div>
+  );
 };
 
 export default SalesChart;
